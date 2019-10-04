@@ -656,6 +656,31 @@ def transformer_xl(inp_k, n_token, n_layer, d_model, n_head,
     return output, new_mems, lookup_table
 
 
+def mse_loss(hidden, target, n_token, d_model, initializer, lookup_table=None,
+            tie_weight=False):
+  """doc."""
+
+  with tf.variable_scope('lm_loss'):
+    if tie_weight:
+      assert lookup_table is not None, \
+          'lookup_table cannot be None for tie_weight'
+      softmax_w = lookup_table
+    else:
+      softmax_w = tf.get_variable('weight', [n_token, d_model],
+                                  dtype=hidden.dtype, initializer=initializer)
+
+    softmax_b = tf.get_variable('bias', [n_token], dtype=hidden.dtype,
+                                initializer=tf.zeros_initializer())
+
+    logits = tf.einsum('ibd,nd->ibn', hidden, softmax_w) + softmax_b
+
+
+    loss = tf.losses.MSE()
+
+    return loss
+
+
+
 def lm_loss(hidden, target, n_token, d_model, initializer, lookup_table=None,
             tie_weight=False, bi_data=True, use_tpu=False):
   """doc."""

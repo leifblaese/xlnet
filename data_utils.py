@@ -10,14 +10,13 @@ import random
 
 from absl import flags
 import absl.logging as _logging  # pylint: disable=unused-import
-
+from  util.mp3_converter_utils import convert_mp3_to_bitfield
 import numpy as np
 
 
 import tensorflow as tf
 
 from prepro_utils import preprocess_text, encode_ids
-import sentencepiece as spm
 
 
 special_symbols = {
@@ -32,7 +31,7 @@ special_symbols = {
     "<eop>"  : 8,
 }
 
-VOCAB_SIZE = 32000
+VOCAB_SIZE = 65535
 UNK_ID = special_symbols["<unk>"]
 CLS_ID = special_symbols["<cls>"]
 SEP_ID = special_symbols["<sep>"]
@@ -77,9 +76,6 @@ def format_filename(prefix, bsz_per_host, seq_len, bi_data, suffix,
 
 
 def _create_data(idx, input_paths):
-  # Load sentence-piece model
-  sp = spm.SentencePieceProcessor()
-  sp.Load(FLAGS.sp_path)
 
   input_shards = []
   total_line_cnt = 0
@@ -87,33 +83,14 @@ def _create_data(idx, input_paths):
     input_data, sent_ids = [], []
     sent_id, line_cnt = True, 0
     tf.logging.info("Processing %s", input_path)
-    for line in tf.gfile.Open(input_path):
-      if line_cnt % 100000 == 0:
-        tf.logging.info("Loading line %d", line_cnt)
-      line_cnt += 1
 
-      if not line.strip():
-        if FLAGS.use_eod:
-          sent_id = not sent_id
-          cur_sent = [EOD_ID]
-        else:
-          continue
-      else:
-        if FLAGS.from_raw_text:
-          cur_sent = preprocess_text(line.strip(), lower=FLAGS.uncased)
-          cur_sent = encode_ids(sp, cur_sent)
-        else:
-          cur_sent = list(map(int, line.strip().split()))
+    cur_sent = convert_mp3_to_bitfield(input_path)
 
-      input_data.extend(cur_sent)
-      sent_ids.extend([sent_id] * len(cur_sent))
-      sent_id = not sent_id
 
-    tf.logging.info("Finish with line %d", line_cnt)
-    if line_cnt == 0:
-      continue
+    input_data.extend(cur_sent)
+    sent_ids.extend([sent_id] * len(cur_sent))
 
-    input_data = np.array(input_data, dtype=np.int64)
+    input_data = np.array(input_data, dtype=np.bool)
     sent_ids = np.array(sent_ids, dtype=np.bool)
 
     total_line_cnt += line_cnt
@@ -122,7 +99,6 @@ def _create_data(idx, input_paths):
   tf.logging.info("[Task %d] Total number line: %d", idx, total_line_cnt)
 
   tfrecord_dir = os.path.join(FLAGS.save_dir, "tfrecords")
-
   filenames, num_batch = [], 0
 
   # Randomly shuffle input shards (with a fixed but distinct random seed)
@@ -199,7 +175,6 @@ def create_data(_):
         "mask_beta": FLAGS.mask_beta,
         "num_predict": FLAGS.num_predict,
         "use_eod": FLAGS.use_eod,
-        "sp_path": FLAGS.sp_path,
         "input_glob": FLAGS.input_glob,
     }
     corpus_info_path = os.path.join(FLAGS.save_dir, "corpus_info.json")
@@ -658,7 +633,7 @@ def get_dataset(params, num_hosts, num_core_per_host, split, file_names,
     """function used to parse tfrecord."""
 
     record_spec = {
-        "input": tf.FixedLenFeature([seq_len], tf.int64),
+        "input": tf.FixedLenFeature([seq_len], tf.bool),
         "target": tf.FixedLenFeature([seq_len], tf.int64),
         "seg_id": tf.FixedLenFeature([seq_len], tf.int64),
         "label": tf.FixedLenFeature([1], tf.int64),
@@ -883,7 +858,6 @@ if __name__ == "__main__":
   flags.DEFINE_integer("reuse_len", 256,
                        help="Number of token that can be reused as memory. "
                        "Could be half of `seq_len`.")
-  flags.DEFINE_bool("uncased", True, help="Use uncased inputs or not.")
   flags.DEFINE_bool("bi_data", True,
                     help="whether to create bidirectional data")
   flags.DEFINE_integer("mask_alpha", default=6,
@@ -892,14 +866,11 @@ if __name__ == "__main__":
                        help="How many tokens to mask within each group.")
   flags.DEFINE_bool("use_eod", True,
                     help="whether to append EOD at the end of a doc.")
-  flags.DEFINE_bool("from_raw_text", True,
-                    help="Whether the input is raw text or encoded ids.")
   flags.DEFINE_integer("num_predict", default=85,
                        help="Num of tokens to predict.")
 
-  flags.DEFINE_string("input_glob", "data/example/*.txt",
+  flags.DEFINE_string("input_glob", "data/example/*.mp3",
                       help="Input file glob.")
-  flags.DEFINE_string("sp_path", "", help="Path to the sentence piece model.")
   flags.DEFINE_string("save_dir", "proc_data/example",
                       help="Directory for saving the processed data.")
   flags.DEFINE_enum("split", "train", ["train", "dev", "test"],

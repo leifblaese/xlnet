@@ -4,6 +4,8 @@ from __future__ import division
 from __future__ import print_function
 
 import unicodedata
+
+import numpy as np
 import six
 from functools import partial
 
@@ -65,74 +67,61 @@ def preprocess_text(inputs, lower=False, remove_space=True, keep_accents=False):
   return outputs
 
 
-def encode_pieces(sp_model, text, return_unicode=True, sample=False):
-  # return_unicode is used only for py2
-
-  # note(zhiliny): in some systems, sentencepiece only accepts str for py2
-  if six.PY2 and isinstance(text, unicode):
-    text = text.encode('utf-8')
-
-  if not sample:
-    pieces = sp_model.EncodeAsPieces(text)
-  else:
-    pieces = sp_model.SampleEncodeAsPieces(text, 64, 0.1)
-  new_pieces = []
-  for piece in pieces:
-    if len(piece) > 1 and piece[-1] == ',' and piece[-2].isdigit():
-      cur_pieces = sp_model.EncodeAsPieces(
-          piece[:-1].replace(SPIECE_UNDERLINE, ''))
-      if piece[0] != SPIECE_UNDERLINE and cur_pieces[0][0] == SPIECE_UNDERLINE:
-        if len(cur_pieces[0]) == 1:
-          cur_pieces = cur_pieces[1:]
-        else:
-          cur_pieces[0] = cur_pieces[0][1:]
-      cur_pieces.append(piece[-1])
-      new_pieces.extend(cur_pieces)
-    else:
-      new_pieces.append(piece)
-
-  # note(zhiliny): convert back to unicode for py2
-  if six.PY2 and return_unicode:
-    ret_pieces = []
-    for piece in new_pieces:
-      if isinstance(piece, str):
-        piece = piece.decode('utf-8')
-      ret_pieces.append(piece)
-    new_pieces = ret_pieces
-
-  return new_pieces
+def raise_min(n: int) -> int:
+    return n + 32768
 
 
-def encode_ids(sp_model, text, sample=False):
-  pieces = encode_pieces(sp_model, text, return_unicode=False, sample=sample)
-  ids = [sp_model.PieceToId(piece) for piece in pieces]
-  return ids
+def raise_min_of_array(array: np.array) -> np.array:
+  return np.array(list(map(lambda x: raise_min(x), array)))
+
+
+def bitfield(n):
+    """
+    Convert an unsigned 16-bit integer into a bitfield of size 16.
+    Example: 7 -> [ 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 ]
+    This will only work for unsigned integers so you need to make sure
+    to raise signed integers by INT_MIN.
+    """
+    return np.array([n >> i & 1 for i in range(16 - 1, -1, -1)])
+
+
+def get_bitfield_from_array(array: np.array) -> np.array:
+    """Convert a whole array of unsigned 16 bit ints into a bitfield"""
+    return np.array(list(map(lambda x: bitfield(x), array)))
+
+
+def encode_pieces(arr: np.array) -> np.array:
+    return encode_ids(arr)
+
+
+def encode_ids(array: np.array):
+    return get_bitfield_from_array(array)
 
 
 if __name__ == '__main__':
   import sentencepiece as spm
-
-  sp = spm.SentencePieceProcessor()
-  sp.load('sp10m.uncased.v3.model')
-
-  print_(u'I was born in 2000, and this is falsé.')
-  print_(u'ORIGINAL', sp.EncodeAsPieces(u'I was born in 2000, and this is falsé.'))
-  print_(u'OURS', encode_pieces(sp, u'I was born in 2000, and this is falsé.'))
-  print(encode_ids(sp, u'I was born in 2000, and this is falsé.'))
-  print_('')
-  prepro_func = partial(preprocess_text, lower=True)
-  print_(prepro_func('I was born in 2000, and this is falsé.'))
-  print_('ORIGINAL', sp.EncodeAsPieces(prepro_func('I was born in 2000, and this is falsé.')))
-  print_('OURS', encode_pieces(sp, prepro_func('I was born in 2000, and this is falsé.')))
-  print(encode_ids(sp, prepro_func('I was born in 2000, and this is falsé.')))
-  print_('')
-  print_('I was born in 2000, and this is falsé.')
-  print_('ORIGINAL', sp.EncodeAsPieces('I was born in 2000, and this is falsé.'))
-  print_('OURS', encode_pieces(sp, 'I was born in 2000, and this is falsé.'))
-  print(encode_ids(sp, 'I was born in 2000, and this is falsé.'))
-  print_('')
-  print_('I was born in 92000, and this is falsé.')
-  print_('ORIGINAL', sp.EncodeAsPieces('I was born in 92000, and this is falsé.'))
-  print_('OURS', encode_pieces(sp, 'I was born in 92000, and this is falsé.'))
-  print(encode_ids(sp, 'I was born in 92000, and this is falsé.'))
-
+  #
+  # sp = spm.SentencePieceProcessor()
+  # sp.load('sp10m.uncased.v3.model')
+  #
+  # print_(u'I was born in 2000, and this is falsé.')
+  # print_(u'ORIGINAL', sp.EncodeAsPieces(u'I was born in 2000, and this is falsé.'))
+  # print_(u'OURS', encode_pieces(sp, u'I was born in 2000, and this is falsé.'))
+  # print(encode_ids(sp, u'I was born in 2000, and this is falsé.'))
+  # print_('')
+  # prepro_func = partial(preprocess_text, lower=True)
+  # print_(prepro_func('I was born in 2000, and this is falsé.'))
+  # print_('ORIGINAL', sp.EncodeAsPieces(prepro_func('I was born in 2000, and this is falsé.')))
+  # print_('OURS', encode_pieces(sp, prepro_func('I was born in 2000, and this is falsé.')))
+  # print(encode_ids(sp, prepro_func('I was born in 2000, and this is falsé.')))
+  # print_('')
+  # print_('I was born in 2000, and this is falsé.')
+  # print_('ORIGINAL', sp.EncodeAsPieces('I was born in 2000, and this is falsé.'))
+  # print_('OURS', encode_pieces(sp, 'I was born in 2000, and this is falsé.'))
+  # print(encode_ids(sp, 'I was born in 2000, and this is falsé.'))
+  # print_('')
+  # print_('I was born in 92000, and this is falsé.')
+  # print_('ORIGINAL', sp.EncodeAsPieces('I was born in 92000, and this is falsé.'))
+  # print_('OURS', encode_pieces(sp, 'I was born in 92000, and this is falsé.'))
+  # print(encode_ids(sp, 'I was born in 92000, and this is falsé.'))
+  #
